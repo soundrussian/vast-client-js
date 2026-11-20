@@ -16,7 +16,7 @@
       "javascript"
     ],
     "dependencies": {
-      "@dailymotion/vast-client": "5.0.0"
+      "@dailymotion/vast-client": "file:../.."
     }
   }
   

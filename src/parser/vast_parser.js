@@ -302,6 +302,7 @@ export class VASTParser extends EventEmitter {
     if (ads.length === 1 && wrapperDepth > 0 && wrapperSequence !== undefined) {
       ads[0].sequence = wrapperSequence;
     }
+    const resolutionOptions = { wrapperDepth, previousUrl, url, wrapperChainId };
     if (resolveAll === false) {
       const adPods = parserUtils.getSortedAdPods(ads);
       const standAloneAds = parserUtils.getStandAloneAds(ads);
@@ -313,14 +314,16 @@ export class VASTParser extends EventEmitter {
       }
 
       this.remainingAds = standAloneAds;
+      if (isRootVAST && !adPods.length) {
+        return this.resolveRootStandaloneAds(ads, resolutionOptions);
+      }
     }
 
-    return this.resolveAds(ads, {
-      wrapperDepth,
-      previousUrl,
-      url,
-      wrapperChainId,
-    });
+    return this.resolveAds(ads, resolutionOptions);
+  }
+
+  resolveRootStandaloneAds(ads, options) {
+    return this.resolveAds(ads, options);
   }
 
   /**
@@ -464,12 +467,7 @@ export class VASTParser extends EventEmitter {
         // - No Creative case - The parser has dealt with some <Ad><Wrapper> or/and an <Ad><Inline> elements
         // but no creative was found
         const ad = vastResponse.ads[index];
-        const noMediaFilesAvailable = !ad.creatives.some(
-          (creative) =>
-            creative.mediaFiles?.length > 0 || creative.variations?.length > 0
-        );
-
-        if ((ad.errorCode || noMediaFilesAvailable) && !ad.VASTAdTagURI) {
+        if (parserUtils.isFailedAd(ad)) {
           // If VASTAdTagURI is in the vastResponse, it means we are dealing with a Wrapper when using parseVAST from the VASTParser.
           // In that case, we dont want to modify the vastResponse since the creatives node is not required in a wrapper.
           this.trackVastError(

@@ -50,18 +50,12 @@ function handleError(response) {
 }
 
 async function get(url, options) {
+  const timeout = options.timeout || DEFAULT_TIMEOUT;
   try {
     // fetch does not have "timeout" option, we are using AbortController
     // to abort the request if it reach the timeout.
     const controller = new AbortController();
-    const timer = setTimeout(() => {
-      controller.abort();
-      throw new Error(
-        `URLHandler: Request timed out after ${
-          options.timeout || DEFAULT_TIMEOUT
-        } ms (408)`
-      );
-    }, options.timeout || DEFAULT_TIMEOUT);
+    const timer = setTimeout(() => controller.abort(), timeout);
 
     const response = await fetch(url, {
       ...options,
@@ -77,9 +71,15 @@ async function get(url, options) {
     }
     return handleResponse(response);
   } catch (error) {
+    if (error.name === 'AbortError') {
+      return {
+        error: new Error(`URLHandler: Request timed out after ${timeout} ms (408)`),
+        statusCode: 408,
+      };
+    }
     return {
       error,
-      statusCode: error.name === 'AbortError' ? 408 : null,
+      statusCode: null,
     };
   }
 }

@@ -105,7 +105,7 @@ Gets a parsed VAST document for the given url, applying the skipping rules defin
 
 Returns a `Promise` which either resolves with the fully parsed [`VASTResponse`](https://github.com/dailymotion/vast-client-js/blob/master/docs/api/class-reference.md#vastresponse) or rejects with an `Error`.
 
-By default the fully parsed `VASTResponse` contains all the Ads contained in the `VAST` resource. It's possible to get only the first Ad or AdPod and then get the remaining ones on demand by passing `resolveAll: false` in the `options` parameter.
+By default, `get()` returns the first Ad or AdPod. Call `getNextAds()` to retrieve the remaining ads in order, or pass `resolveAll: true` to request all ads in one response.
 
 #### Parameters
 
@@ -117,7 +117,7 @@ By default the fully parsed `VASTResponse` contains all the Ads contained in the
   - `wrapperLimit: Number` - A number of Wrapper responses that can be received with no InLine response (default `10`)
   - `urlHandler: URLHandler` - Custom urlhandler to be used instead of the default ones [`urlhandlers`](../../src/urlhandlers)
   - `urlhandler: URLHandler` - Fulfills the same purpose as `urlHandler`, which is the preferred parameter to use
-  - `resolveAll: Boolean` - Allows you to parse all the ads contained in the VAST or to parse: only the AdPod, or stand alone ad per stand alone ad (default `true`)
+  - `resolveAll: Boolean` - Set to `true` to resolve all ads in one response (default `false`).
   - `allowMultipleAds: Boolean` - A Boolean value that identifies whether multiple ads are allowed in the requested VAST response. This will override any value of allowMultipleAds attribute set in the VAST
   - `followAdditionalWrappers: Boolean` - a Boolean value that identifies whether subsequent Wrappers after a requested VAST response is allowed. This will override any value of followAdditionalWrappers attribute set in the VAST
 
@@ -167,6 +167,7 @@ If you just need to parse an inline VAST or you want to parse the first VAST doc
 - **`vastXml: Object`** - An object representing an xml document
 - **`options: Object`** - An optional Object of parameters to be used in the parsing process
   - `timeout: Number` - A custom timeout for the possible wrapper resolving requests (default `120000`)
+  - `resolveAll: Boolean` - Set to `false` to retrieve standalone candidates in order with `getNextAds()` (default `true`).
   - `withCredentials: Boolean` - A boolean to enable the withCredentials options for the XHR URLHandler (default `false`)
   - `fetchOptions: Object` - Additional options to pass to the fetch request, like headers, cache, etc.
   - `wrapperLimit: Number` - A number of Wrapper responses that can be received with no InLine response (default `10`)
@@ -285,7 +286,9 @@ vastClient.getNextAds()
 
 **Why should you use `resolveAll=false`?**
 
-Most times you will only need the first Ad or AdPod (following ones are usually either optional ads or fallback ones). Using `resolveAll=false` allows you to avoid useless calls to resolve every wrapper chain of the initial VAST.
+For a root list of standalone ads, this fork resolves the first candidate and prepares the next wrapper chain in the background. The first response is available as soon as its own chain finishes. A failed or empty standby chain makes room for the next candidate. Prefetch can therefore issue a wrapper request even when the first ad plays.
+
+In the player, try the ads in response order. Advance with `getNextAds()` after an empty response or after every ad in the current response fails to start. Check media support and handle both media errors and `play()` rejections. Record the impression at the first `playing` event and finish the ad break if a later playback error occurs. The HTML5 example follows this flow and uses the local checkout. Build the library from the repository root before running the example.
 
 ### hasRemainingAds(): Boolean
 

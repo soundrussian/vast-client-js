@@ -1,5 +1,5 @@
 import { Storage } from './util/storage';
-import { VASTParser } from './parser/vast_parser';
+import { PrefetchingVASTParser } from './parser/standalone_wrapper_prefetch';
 import { Fetcher } from './fetcher/fetcher.js';
 
 /**
@@ -24,7 +24,7 @@ export class VASTClient {
     this.cappingFreeLunch = cappingFreeLunch;
     this.cappingMinimumTimeInterval = cappingMinimumTimeInterval;
     this.fetcher = new Fetcher();
-    this.vastParser = new VASTParser({ fetcher: this.fetcher });
+    this.vastParser = new PrefetchingVASTParser({ fetcher: this.fetcher });
     this.storage = customStorage;
     // Init values if not already set
     if (this.lastSuccessfulAd === undefined) {
@@ -72,6 +72,7 @@ export class VASTClient {
     this.fetcher.clearURLTemplateFilters();
   }
 
+  /** @returns {import('./parser/vast_parser').VASTParser} */
   getParser() {
     return this.vastParser;
   }

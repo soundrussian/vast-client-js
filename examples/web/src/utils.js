@@ -12,85 +12,114 @@ let vastTracker = null;
 //vastTracker for companion ads
 let companionVastTracker = null;
 
-/**
- * Get the first valid creative from an ad
- */
-export const getCreative = (ad) => {
-  if (!ad.creatives) {
-    return null;
+function selectMedia(ad) {
+  for (const creative of ad.creatives) {
+    if (creative.type !== 'linear') {
+      continue;
+    }
+    const media = creative.mediaFiles.find(
+      (file) => file.fileURL &&
+        (!file.mimeType || videoPlayer.canPlayType(file.mimeType))
+    );
+    if (media) {
+      return { creative, media };
+    }
   }
+  return null;
+}
 
-  return ad.creatives.find((creative) => creative.mediaFiles) || null;
-};
+function startMedia(url) {
+  return new Promise((resolve, reject) => {
+    function finish(error) {
+      videoPlayer.removeEventListener('playing', onPlaying);
+      videoPlayer.removeEventListener('error', onError);
+      if (error) {
+        reject(error);
+      } else {
+        resolve();
+      }
+    }
 
-/**
- * Get the URL of the first media file in the creative
- */
+    function onPlaying() {
+      finish();
+    }
 
-export const getMediaFileUrl = (creative) => {
-  const mediaFiles = creative.mediaFiles;
-  if (!mediaFiles.length) {
-    return null;
-  }
+    function onError() {
+      finish(videoPlayer.error || new Error('Ad media failed'));
+    }
 
-  return mediaFiles.find((mediaFile) => mediaFile.fileURL).fileURL || null;
-};
-
-/**
- * @returns a promise that resolves with the parsed VAST
- */
-
-export const parsePreroll = async () => {
-  const VAST = 'https://statics.dmcdn.net/h/html/vast/simple-inline.xml';
-
-  const vastClient = new VASTClient();
-  try {
-    return vastClient.get(VAST);
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error(error);
-  }
-};
-
-/**
- * play a preroll
- */
+    videoPlayer.addEventListener('playing', onPlaying);
+    videoPlayer.addEventListener('error', onError);
+    videoPlayer.src = url;
+    videoPlayer.play().catch(finish);
+  });
+}
 
 export const playPreroll = async () => {
-  const parsedVAST = await parsePreroll();
-  // here we are using the first ad from the parsed vast that contain creatives,
-  // however, this logic can depend on you player implementation logic
-  const validAd = parsedVAST.ads.find((ads) => ads.creatives.length > 0);
-  if (!validAd) {
+  const client = new VASTClient();
+  const url = 'https://statics.dmcdn.net/h/html/vast/simple-inline.xml';
+  videoPlayer.pause();
+  let response;
+
+  try {
+    response = await client.get(url);
+  } catch (error) {
+    stopAd();
     return;
   }
 
-  const creative = getCreative(validAd);
-  const mediaFileUrl = getMediaFileUrl(creative);
-  const variationData = getVariationData(validAd);
-  const companionCreative = getCreativeCompanion(validAd);
+  while (response) {
+    for (const ad of response.ads) {
+      if (ad.hasFailed) {
+        continue;
+      }
+      const selection = selectMedia(ad);
+      if (!selection) {
+        client.getParser().trackVastError(ad.errorURLTemplates, { ERRORCODE: 403 });
+        continue;
+      }
+      const { creative, media } = selection;
+      const tracker = new VASTTracker(client, ad, creative);
+      try {
+        await startMedia(media.fileURL);
+      } catch (error) {
+        if (error.name === 'NotAllowedError') {
+          stopAd();
+          return;
+        }
+        tracker.error({ ERRORCODE: 405 });
+        continue;
+      }
 
-  videoPlayer.src = mediaFileUrl;
-  videoPlayer.play();
+      vastTracker = tracker;
+      const companion = getCreativeCompanion(ad);
+      const variationData = getVariationData(companion);
+      if (variationData) {
+        companionVastTracker = new VASTTracker(
+          null,
+          ad,
+          companion,
+          variationData.variation
+        );
+        displayVariation(variationData);
+        companionVastTracker.track('creativeView');
+      }
 
-  // listen the ended event to stop the ad and remove trackers
-  videoPlayer.addEventListener('ended', stopAd);
+      initTrackers();
+      tracker.trackImpression();
+      return;
+    }
 
-  // once we have the parsed vast we can instantiate the vastTracker
-  vastTracker = new VASTTracker(null, validAd, creative);
-
-  //if we have a companion ad we instantiate the companionVastTracker
-  if (variationData.variation) {
-    companionVastTracker = new VASTTracker(
-      null,
-      validAd,
-      companionCreative,
-      variationData.variation
-    );
+    response = null;
+    while (client.hasRemainingAds() && !response) {
+      try {
+        response = await client.getNextAds();
+      } catch (error) {
+        // A failed candidate was consumed. Continue from the next entry.
+      }
+    }
   }
-
-  displayVariation(variationData);
-  initTrackers();
+  stopAd();
 };
 
 /**
@@ -98,11 +127,16 @@ export const playPreroll = async () => {
  */
 
 export const stopAd = () => {
-  videoPlayer.src = mainContent;
-  videoPlayer.load();
-  videoPlayer.play();
-  variationContainer.style.display = 'none';
   removeTrackers(videoPlayer);
+  vastTracker = null;
+  companionVastTracker = null;
+  variationContainer.style.display = 'none';
+  if (videoPlayer.src !== mainContent) {
+    videoPlayer.src = mainContent;
+  }
+  videoPlayer.play().catch(() => {
+    // Leave the video controls available when autoplay is blocked.
+  });
 };
 
 /**
@@ -111,8 +145,6 @@ export const stopAd = () => {
 export const initTrackers = () => {
   videoPlayer.addEventListener('volumechange', handleMuteTrackers);
   videoPlayer.addEventListener('click', handleClickTrackers);
-  videoPlayer.addEventListener('canplay', handleImpressionTrackers);
-  videoPlayer.addEventListener('canplay', handleCompanionImpressionTrackers);
   videoPlayer.addEventListener('timeupdate', handleTimeUpdateTrackers);
   videoPlayer.addEventListener('ended', handleCompleteTrackers);
   videoPlayer.addEventListener('play', handleResumeTrackers);
@@ -128,8 +160,6 @@ export const initTrackers = () => {
 export const removeTrackers = () => {
   videoPlayer.removeEventListener('volumechange', handleMuteTrackers);
   videoPlayer.removeEventListener('click', handleClickTrackers);
-  videoPlayer.removeEventListener('canplay', handleImpressionTrackers);
-  videoPlayer.removeEventListener('canplay', handleCompanionImpressionTrackers);
   videoPlayer.removeEventListener('timeupdate', handleTimeUpdateTrackers);
   videoPlayer.removeEventListener('play', handleResumeTrackers);
   videoPlayer.removeEventListener('pause', handlePauseTrackers);
@@ -179,26 +209,6 @@ const handleCompanionClickTrackers = () => {
 };
 
 /**
- * Send impression trackers for linear ads using the vastTracker
- */
-const handleImpressionTrackers = () => {
-  if (!vastTracker) {
-    return;
-  }
-  vastTracker.trackImpression();
-};
-
-/**
- * Send impression trackers for companion ads using the vastTracker
- */
-const handleCompanionImpressionTrackers = () => {
-  if (!companionVastTracker) {
-    return;
-  }
-  companionVastTracker.trackImpression();
-};
-
-/**
  * Send complete tracker using the vastTracker
  */
 const handleCompleteTrackers = () => {
@@ -206,6 +216,7 @@ const handleCompleteTrackers = () => {
     return;
   }
   vastTracker.complete();
+  stopAd();
 };
 
 /**
@@ -247,7 +258,8 @@ const handleErrorTrackers = () => {
   if (!vastTracker) {
     return;
   }
-  vastTracker.error();
+  vastTracker.error({ ERRORCODE: 405 });
+  stopAd();
 };
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -273,20 +285,13 @@ const getCreativeCompanion = (ad) => {
  * @returns an Object containing the image url and the variation
  */
 
-const getVariationData = (ad) => {
-  if (!ad.creatives) {
+const getVariationData = (creative) => {
+  const variation = creative?.variations[0];
+  const imgUrl = variation && getVariationUrl(variation);
+  if (!imgUrl) {
     return null;
   }
-  const validCreative = getCreativeCompanion(ad);
-
-  if (!validCreative.variations.length) {
-    return null;
-  }
-
-  return {
-    imgUrl: getVariationUrl(validCreative.variations[0]),
-    variation: validCreative.variations[0],
-  };
+  return { imgUrl, variation };
 };
 
 /**

@@ -320,7 +320,16 @@ function mergeWrapperAdData(unwrappedAd, wrapper) {
   }
 }
 
+function isFailedAd(ad) {
+  const noMediaFilesAvailable = !ad.creatives.some(
+    (creative) =>
+      creative.mediaFiles?.length > 0 || creative.variations?.length > 0
+  );
+  return (ad.errorCode || noMediaFilesAvailable) && !ad.VASTAdTagURI;
+}
+
 export const parserUtils = {
+  isFailedAd,
   childByName,
   childrenByName,
   resolveVastAdTagURI,
